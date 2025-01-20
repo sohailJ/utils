@@ -1,0 +1,101 @@
+#!/usr/bin/env zsh
+
+# Commit message file, commit source, and SHA1
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2
+SHA1=$3
+BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+GUIDELINES="
+# Tags are used to categorize the commit (e.g., [IMP], [ADD], [FIX], etc.)
+#
+# [FIX] - for bug fixes (mostly used in stable versions but also valid for recent bugs in development).
+# [REF] - for refactoring (when a feature is heavily rewritten).
+# [ADD] - for adding new modules.
+# [REM] - for removing resources (dead code, views, modules, etc.).
+# [REV] - for reverting commits (used if a commit causes issues or is unwanted).
+# [MOV] - for moving files (use git move and don't change the content).
+# [REL] - for release commits (new major or minor stable versions).
+# [IMP] - for improvements (incremental changes in development).
+# [MERGE] - for merge commits (used in forward porting of bug fixes).
+# [CLA] - for signing the Odoo Individual Contributor License.
+# [I18N] - for changes in translation files.
+# [PERF] - for performance patches.
+#
+# Please review the task ID and make any necessary changes to the description.
+# You can leave the description section empty if not applicable.
+"
+
+MANIFEST_WARNING_HEADER="#
+# /!\-------------------------------------------/!\.
+# /!\------ MANIFEST NOT DETECTED WARNING ------/!\.
+# /!\-------------------------------------------/!\.
+# Consider bumping version and adding task_id to tasks lists.
+# List of modules not containing __manifest__.py file:
+"
+
+# Get the list of modified files from the staging area
+MODIFIED_FILES=$(git diff --name-only --cached)
+declare -A ROOT_DIRS  # Declare associative array for root directories
+
+# Extract unique root directories (modules) from modified files
+for FILE in $MODIFIED_FILES; do
+  ROOT_DIR=$(echo "$FILE" | cut -d "/" -f 1)
+  ROOT_DIRS[$ROOT_DIR]=1
+done
+
+# List of impacted modules as a comma-separated string
+MODULES=$(echo ${(k)ROOT_DIRS} | tr ' ' ', ')
+
+# Initialize warnings for missing __manifest__.py files
+MANIFEST_WARNING=""
+COMMENT=""
+
+# Check for the presence of __manifest__.py in each module
+for MODULE in ${(k)ROOT_DIRS}; do
+  if ! echo "$MODIFIED_FILES" | grep -q "^$MODULE/__manifest__.py$"; then
+    MANIFEST_WARNING+="# $MODULE\n"
+  fi
+done
+
+# If warnings exist, append them to the COMMENT
+if [[ -n "$MANIFEST_WARNING" ]]; then
+  COMMENT+="$MANIFEST_WARNING_HEADER\n"
+  COMMENT+=$MANIFEST_WARNING
+fi
+
+# Append the guidelines
+COMMENT+="\n$GUIDELINES"
+
+# Extract TASK_ID from branch name and construct the task URL
+if [[ $BRANCH_NAME =~ ^[0-9\.]+-([0-9]+)(-[a-z0-9_-]+)?$ ]]; then
+  TASK_ID=$(echo $BRANCH_NAME | cut -d "-" -f 2)
+  TASK_URL="https://www.odoo.com/web#model=project.task&id=$TASK_ID"
+
+
+  COMMIT_MSG="[TAG][$TASK_ID] $MODULES: Short Description
+
+Task: [#$TASK_ID]($TASK_URL)
+
+Description:
+"
+else
+  # Default commit message if branch name doesn't match expected format
+  COMMIT_MSG="[TAG][TASK_ID]: Short Description
+  Long Description
+  "
+fi
+
+# Ensure the commit message file is properly populated before nano opens
+if [[ -f "$COMMIT_MSG_FILE" ]]; then
+  # Clean up the commit message file (remove instructions/comments)
+  /usr/bin/perl -i.bak -ne "print unless(m/^. Please enter the commit message/..m/^#$/)" "$COMMIT_MSG_FILE"
+
+  # If the file contains only comments or is empty, replace its content with the commit message
+  if ! grep -q -v '^#\|^$' "$COMMIT_MSG_FILE"; then
+    echo "$COMMIT_MSG" >> "$COMMIT_MSG_FILE"
+    echo "$COMMENT" >> "$COMMIT_MSG_FILE"
+  fi
+fi
+
+# Exit the script; Git will open the editor with the commit message now prefilled
+exit 0
