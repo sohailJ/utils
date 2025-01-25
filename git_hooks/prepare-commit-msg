@@ -35,23 +35,26 @@ MANIFEST_WARNING_HEADER="#
 
 # Get the list of modified files from the staging area
 MODIFIED_FILES=$(git diff --name-only --cached)
-declare -A ROOT_DIRS  # Declare associative array for root directories
+ROOT_DIRS=()  # Declare an array to store unique root directories
 
 # Extract unique root directories (modules) from modified files
-for FILE in $MODIFIED_FILES; do
+for FILE in ${(f)MODIFIED_FILES}; do
   ROOT_DIR=$(echo "$FILE" | cut -d "/" -f 1)
-  ROOT_DIRS[$ROOT_DIR]=1
+  if [[ ! " ${ROOT_DIRS[@]} " =~ " ${ROOT_DIR} " ]]; then
+    ROOT_DIRS+=("$ROOT_DIR")
+  fi
 done
 
-# List of impacted modules as a comma-separated string
-MODULES=$(echo ${(k)ROOT_DIRS} | tr ' ' ', ')
+# Create a comma-separated list of unique modules
+MODULES=$(printf "%s," "${ROOT_DIRS[@]}" | sed 's/,$//')
+echo "Detected modules: $MODULES"
 
 # Initialize warnings for missing __manifest__.py files
 MANIFEST_WARNING=""
 COMMENT=""
 
 # Check for the presence of __manifest__.py in each module
-for MODULE in ${(k)ROOT_DIRS}; do
+for MODULE in "${ROOT_DIRS[@]}"; do
   if ! echo "$MODIFIED_FILES" | grep -q "^$MODULE/__manifest__.py$"; then
     MANIFEST_WARNING+="# $MODULE\n"
   fi
@@ -68,19 +71,16 @@ COMMENT+="\n$GUIDELINES"
 
 # Extract TASK_ID from branch name and construct the task URL
 if [[ $BRANCH_NAME =~ ^[0-9\.]+-([0-9]+)(-[a-z0-9_-]+)?$ ]]; then
-  TASK_ID=$(echo $BRANCH_NAME | cut -d "-" -f 2)
+  TASK_ID=${match[1]}
   TASK_URL="https://www.odoo.com/web#model=project.task&id=$TASK_ID"
 
-
-  COMMIT_MSG="[TAG][$TASK_ID] $MODULES: Short Description
+  COMMIT_MSG="[IMP][$TASK_ID] $MODULES: Short Description
 
 Task: [#$TASK_ID]($TASK_URL)
-
-Description:
 "
 else
   # Default commit message if branch name doesn't match expected format
-  COMMIT_MSG="[TAG][TASK_ID]: Short Description
+  COMMIT_MSG="[TAG][TASK_ID] $MODULES: Short Description
   Long Description
   "
 fi
@@ -97,5 +97,5 @@ if [[ -f "$COMMIT_MSG_FILE" ]]; then
   fi
 fi
 
-# Exit the script; Git will open the editor with the commit message now prefilled
+# Exit the script; Git will open the editor (nano) with the commit message now prefilled
 exit 0
